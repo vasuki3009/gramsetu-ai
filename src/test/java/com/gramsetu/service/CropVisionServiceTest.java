@@ -89,6 +89,72 @@ class CropVisionServiceTest {
         verifyNoInteractions(repo, sarvam);
     }
 
+    private static final String LOW_GUESS =
+            "Crop: Tomato\nConfidence: low\nSymptoms: many small dark spots on a green leaf\nDisease: Early blight\n"
+            + "Treatment:\n1. Spray Mancozeb\nMedicine: Mancozeb\n";
+
+    @Test
+    void lowConfidenceWithGuess_returnsTentativeReply_noMedicine_noVerified_noAdvisoryLookup_noAudio() {
+        geminiReplies(LOW_GUESS);
+        CropResponse r = service(true).analyzeCropImage(IMG, "english");
+        assertTrue(r.isUnsure());
+        assertFalse(r.isVerified());
+        assertEquals(String.format(CropDiagnosis.TENTATIVE_ENGLISH_FORMAT, "Tomato",
+                "many small dark spots on a green leaf", "Early blight"), r.getDiagnosis());
+        assertFalse(r.getDiagnosis().toLowerCase().contains("mancozeb"));
+        assertFalse(r.getDiagnosis().contains("Medicine:"));
+        assertFalse(r.getDiagnosis().contains(CropDiagnosis.VERIFIED_LABEL_ENGLISH));
+        assertEquals("", r.getAudioBase64());
+        verifyNoInteractions(repo, sarvam);
+    }
+
+    @Test
+    void lowConfidenceWithGuess_tamil_returnsTentativeTamilReply() {
+        geminiReplies("பயிர்: தக்காளி\nநம்பிக்கை: low\nஅறிகுறிகள்: இலையில் கருப்புப் புள்ளிகள்\nநோய்: இலைப்புள்ளி நோய்\n"
+                + "மருந்து: மான்கோசெப்");
+        CropResponse r = service(true).analyzeCropImage(IMG, "tamil");
+        assertTrue(r.isUnsure());
+        assertTrue(r.getDiagnosis().startsWith("எனக்கு முழுமையாக உறுதியாகத் தெரியவில்லை."));
+        assertFalse(r.getDiagnosis().contains("மான்கோசெப்"));
+        verifyNoInteractions(repo, sarvam);
+    }
+
+    @Test
+    void lowConfidenceWithoutUsableGuess_stillGetsTheFullNotSureMessage() {
+        geminiReplies("Crop: Tomato\nConfidence: low\nResult: I am not sure.");
+        assertEquals(CropDiagnosis.UNSURE_ENGLISH, service(true).analyzeCropImage(IMG, "english").getDiagnosis());
+        geminiReplies("Crop: Tomato\nConfidence: low\nDisease: Early blight");   // no symptoms
+        assertEquals(CropDiagnosis.UNSURE_ENGLISH, service(true).analyzeCropImage(IMG, "english").getDiagnosis());
+    }
+
+    @Test
+    void missingSectionsAndMissingConfidence_stillGetTheFullNotSureMessage() {
+        geminiReplies("Crop: Tomato\nSymptoms: dark spots\nDisease: Early blight");        // no confidence line
+        assertEquals(CropDiagnosis.UNSURE_ENGLISH, service(true).analyzeCropImage(IMG, "english").getDiagnosis());
+        geminiReplies("Crop: Tomato\nConfidence: high\nSymptoms: dark spots");              // no disease
+        assertEquals(CropDiagnosis.UNSURE_ENGLISH, service(true).analyzeCropImage(IMG, "english").getDiagnosis());
+    }
+
+    @Test
+    void unsureLog_hasOnlyTheReasonCode_neverTheAnswerText() {
+        var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(CropVisionService.class);
+        var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            geminiReplies(LOW_GUESS);
+            service(true).analyzeCropImage(IMG, "english");
+            String logged = appender.list.stream().map(e -> e.getFormattedMessage()).reduce("", (a, b) -> a + "\n" + b);
+            assertTrue(logged.contains("reason=LOW_CONFIDENCE"));
+            assertTrue(logged.contains("tentative=true"));
+            for (String secret : new String[]{"Tomato", "dark spots", "Early blight", "Mancozeb"}) {
+                assertFalse(logged.contains(secret), "log must not contain answer text: " + secret);
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
     @Test
     void confidentAnswer_isReturned_withKvkNote() {
         geminiReplies("Crop: Tomato\nConfidence: high\nDisease: Early blight\nMedicine: Mancozeb");

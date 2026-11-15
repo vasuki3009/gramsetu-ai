@@ -51,25 +51,35 @@ public class CropVisionService {
 
                     Step 1: Identify the crop you see. Do NOT assume a crop and do NOT default to
                     paddy/rice or any other crop. It can be any plant.
-                    Step 2: State your confidence: high, medium or low.
-                    Step 3: Diagnose a disease ONLY for the crop you identified, and only from what is
-                    visible in the photo.
+                    Step 2: Describe what is actually visible on the plant (colour, shape, size and
+                    position of spots, patches, holes or discolouration) BEFORE naming any disease.
+                    Step 3: State your confidence: high, medium or low.
+                    Step 4: Diagnose a disease ONLY for the crop you identified, and only from the
+                    symptoms you described.
 
-                    If the photo is not a crop leaf or plant, is blurry, too dark, too far away, shows
-                    several different plants, or your confidence is low, do NOT guess. Reply with ONLY
+                    If the photo is not a plant, is blurry, too dark, too far away, shows several
+                    different plants, or you cannot tell which plant it is, do NOT guess. Reply with ONLY
                     these three lines and nothing else:
                     Crop: [crop name, or "unclear" / "not a crop leaf"]
                     Confidence: low
                     Result: I am not sure.
                     In that case never name any disease, treatment or medicine.
 
-                    Otherwise reply ONLY in this exact format in English:
+                    If a plant is clearly visible but you are not confident about the cause, reply with
+                    ONLY these four lines and nothing else:
+                    Crop: [your best guess of the crop]
+                    Confidence: low
+                    Symptoms: [what is visible, in one short sentence]
+                    Disease: [one possible problem, name only]
+                    In that case never write any treatment or medicine.
+
+                    Otherwise (you are confident) reply ONLY in this exact format in English:
 
                     Crop: [crop name]
                     Confidence: [one English word: high or medium]
+                    Symptoms: [2-3 visible symptoms observed in this image]
                     Disease: [full disease name with scientific name if known, for that crop]
                     Severity: [mild / moderate / severe - only if you can judge it from the photo, otherwise leave this line out]
-                    Symptoms: [2-3 visible symptoms observed in this image]
                     Cause: [root cause - fungus / bacteria / virus / pest / nutrient deficiency]
                     Treatment:
                     1. [immediate action - remove/isolate]
@@ -86,8 +96,10 @@ public class CropVisionService {
 
                     படி 1: படத்தில் எந்தப் பயிர் தெரிகிறது என்று முதலில் அடையாளம் காணவும். எந்தப் பயிரையும்
                     (நெல் உட்பட) முன்கூட்டியே ஊகிக்க வேண்டாம். எந்தச் செடியாகவும் இருக்கலாம்.
-                    படி 2: உங்கள் நம்பிக்கை அளவைச் சொல்லவும்: high, medium அல்லது low.
-                    படி 3: நீங்கள் அடையாளம் கண்ட அந்தப் பயிருக்கு மட்டும், படத்தில் தெரிவதை வைத்து மட்டும் நோயைக் கண்டறியவும்.
+                    படி 2: எந்த நோயின் பெயரையும் சொல்வதற்கு முன், செடியில் உண்மையில் தெரிவதை (புள்ளிகள், திட்டுகள், துளைகள்,
+                    நிற மாற்றம் - அவற்றின் நிறம், வடிவம், இடம்) முதலில் விவரிக்கவும்.
+                    படி 3: உங்கள் நம்பிக்கை அளவைச் சொல்லவும்: high, medium அல்லது low.
+                    படி 4: நீங்கள் அடையாளம் கண்ட அந்தப் பயிருக்கு மட்டும், நீங்கள் விவரித்த அறிகுறிகளை வைத்து மட்டும் நோயைக் கண்டறியவும்.
 
                     வேறுபாடுகள்:
                     - புள்ளிகள், கருப்பு/பழுப்பு திட்டுகள், எரிந்த விளிம்புகள் = பூஞ்சை அல்லது பாக்டீரியா நோய்
@@ -95,20 +107,27 @@ public class CropVisionService {
                     - சீரான வெளிர் மஞ்சள் நிறம் (புள்ளிகள் இல்லாமல்) = சத்துக்குறைபாடு
                     - இலையில் துளைகள், கடித்த தடங்கள் = பூச்சி தாக்குதல்
 
-                    படம் பயிர் இலை இல்லை, மங்கலாக / இருட்டாக / தொலைவில் உள்ளது, பல செடிகள் கலந்துள்ளன, அல்லது உங்கள்
-                    நம்பிக்கை குறைவு என்றால் ஊகிக்க வேண்டாம். அப்போது இந்த மூன்று வரிகளை மட்டும் எழுதவும்:
+                    படம் செடியே இல்லை, மங்கலாக / இருட்டாக / தொலைவில் உள்ளது, பல செடிகள் கலந்துள்ளன, அல்லது
+                    எந்தச் செடி என்றே உங்களுக்குத் தெரியவில்லை என்றால் ஊகிக்க வேண்டாம். அப்போது இந்த மூன்று வரிகளை மட்டும் எழுதவும்:
                     பயிர்: [பயிரின் பெயர், அல்லது "தெளிவில்லை" / "பயிர் இலை இல்லை"]
                     நம்பிக்கை: low
                     முடிவு: எனக்கு உறுதியாகத் தெரியவில்லை.
                     அப்போது எந்த நோய், சிகிச்சை, மருந்தின் பெயரையும் எழுதக் கூடாது.
 
-                    இல்லையெனில், கீழ்க்கண்ட வடிவத்தில் தமிழில் மட்டுமே பதில் சொல்லவும்:
+                    செடி தெளிவாகத் தெரிகிறது, ஆனால் காரணம் பற்றி உங்களுக்கு உறுதி இல்லை என்றால், இந்த நான்கு வரிகளை மட்டும் எழுதவும்:
+                    பயிர்: [உங்கள் சிறந்த ஊகம்]
+                    நம்பிக்கை: low
+                    அறிகுறிகள்: [படத்தில் தெரிவது, ஒரு சிறு வாக்கியத்தில்]
+                    நோய்: [இருக்கக்கூடிய ஒரு பிரச்சனை - பெயர் மட்டும்]
+                    அப்போது எந்த சிகிச்சை, மருந்தையும் எழுதக் கூடாது.
+
+                    இல்லையெனில் (உறுதியாக இருந்தால்), கீழ்க்கண்ட வடிவத்தில் தமிழில் மட்டுமே பதில் சொல்லவும்:
 
                     பயிர்: [பயிரின் பெயர்]
                     நம்பிக்கை: [ஒரு ஆங்கிலச் சொல்: high அல்லது medium]
+                    அறிகுறிகள்: [இந்த படத்தில் தெரியும் 2-3 குறிப்பிட்ட அறிகுறிகள் - நிறம், வடிவம், இடம்]
                     நோய்: [அந்தப் பயிருக்கான சரியான நோயின் பெயர் தமிழிலும் ஆங்கிலத்திலும்]
                     தீவிரம்: [லேசானது / மிதமானது / கடுமையானது - படத்தில் இருந்து மதிப்பிட முடிந்தால் மட்டும்; இல்லையெனில் இந்த வரியை விட்டுவிடவும்]
-                    அறிகுறிகள்: [இந்த படத்தில் தெரியும் 2-3 குறிப்பிட்ட அறிகுறிகள் - நிறம், வடிவம், இடம்]
                     காரணம்: [மூல காரணம் - பூஞ்சான் / பாக்டீரியா / வைரஸ் / பூச்சி / சத்துக்குறைபாடு]
                     சிகிச்சை:
                     1. [உடனடி நடவடிக்கை]
@@ -131,9 +150,16 @@ public class CropVisionService {
             log.debug("Gemini crop diagnosis received ({} chars)", geminiDiagnosis.length());
 
             // Show a diagnosis only when the model named the crop with medium/high confidence.
-            if (CropDiagnosis.isUnsure(geminiDiagnosis)) {
-                log.info("Crop vision: model unsure or photo unclear - returning the not-sure message");
-                return new CropResponse(CropDiagnosis.unsureMessage(language), false, "", "", true);
+            // Low confidence with a named plant, visible symptoms and a possible problem gets a clearly
+            // "not sure" tentative reply (no medicine, no verified line); everything else gets the fixed message.
+            CropDiagnosis.UnsureReason reason = CropDiagnosis.unsureReason(geminiDiagnosis);
+            if (reason != null) {
+                String tentative = reason == CropDiagnosis.UnsureReason.LOW_CONFIDENCE
+                        ? CropDiagnosis.tentativeMessage(geminiDiagnosis, language) : null;
+                // Reason code only - never the answer text.
+                log.info("Crop vision: unsure reason={} tentative={}", reason, tentative != null);
+                return new CropResponse(tentative != null ? tentative : CropDiagnosis.unsureMessage(language),
+                        false, "", "", true);
             }
 
             // Verified only when BOTH the crop and the disease match one advisory entry.

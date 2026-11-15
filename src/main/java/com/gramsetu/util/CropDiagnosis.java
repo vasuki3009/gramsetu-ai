@@ -75,21 +75,87 @@ public final class CropDiagnosis {
      * Missing or unreadable confidence counts as unsure.
      */
     public static boolean isUnsure(String text) {
-        if (text == null || text.isBlank()) return true;
+        return unsureReason(text) != null;
+    }
+
+    /** Why an answer cannot be shown as a diagnosis. Only these codes are ever logged, never the answer. */
+    public enum UnsureReason {
+        EMPTY_ANSWER, NO_CONFIDENCE_LINE, LOW_CONFIDENCE, NO_CROP, UNCLEAR_CROP, NOT_SURE_PHRASE, NO_DISEASE_SECTION
+    }
+
+    /** The first reason the answer is unsure, or null when it can be shown as a diagnosis. */
+    public static UnsureReason unsureReason(String text) {
+        if (text == null || text.isBlank()) return UnsureReason.EMPTY_ANSWER;
         String conf = confidence(text);
-        if (conf == null || "low".equals(conf)) return true;
+        if (conf == null) return UnsureReason.NO_CONFIDENCE_LINE;
+        if ("low".equals(conf)) return UnsureReason.LOW_CONFIDENCE;
         String crop = crop(text);
-        if (crop == null || crop.isBlank()) return true;
-        String cropLower = crop.toLowerCase(Locale.ROOT);
-        for (String w : UNCLEAR_CROP_WORDS) {
-            if (cropLower.contains(w)) return true;
-        }
-        String lower = text.toLowerCase(Locale.ROOT);
-        for (String p : NOT_SURE_PHRASES) {
-            if (lower.contains(p)) return true;
-        }
+        if (crop == null || crop.isBlank()) return UnsureReason.NO_CROP;
+        if (containsAny(crop, UNCLEAR_CROP_WORDS)) return UnsureReason.UNCLEAR_CROP;
+        if (containsAny(text, NOT_SURE_PHRASES)) return UnsureReason.NOT_SURE_PHRASE;
         String disease = lineValue(text, DISEASE);
-        return disease == null || disease.isBlank();
+        if (disease == null || disease.isBlank()) return UnsureReason.NO_DISEASE_SECTION;
+        return null;
+    }
+
+    private static boolean containsAny(String text, String[] needles) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        for (String n : needles) {
+            if (lower.contains(n)) return true;
+        }
+        return false;
+    }
+
+    // ---- Tentative reply: low confidence, but a plant, visible symptoms and a possible problem were named ----
+
+    private static final String[] SYMPTOMS = {"Symptoms", "அறிகுறிகள்"};
+
+    /** Words that mean the model slipped treatment advice into a field that should only describe or name. */
+    private static final String[] TREATMENT_WORDS = {
+            "medicine", "spray", "fungicide", "pesticide", "insecticide", "bactericide", "dosage", "apply", "treat",
+            "மருந்து", "தெளி", "சிகிச்சை"};
+    private static final Pattern DOSE = Pattern.compile("\\d\\s*(ml|gm|g|kg|l)\\b", Pattern.CASE_INSENSITIVE);
+
+    public static final String TENTATIVE_TAMIL_FORMAT =
+            "எனக்கு முழுமையாக உறுதியாகத் தெரியவில்லை. கீழே உள்ளது என் ஊகம் மட்டுமே, உறுதியான முடிவு அல்ல.\n\n"
+            + "பயிர் (ஊகம்): %s\n"
+            + "படத்தில் தெரிவது: %s\n"
+            + "இருக்கக்கூடிய பிரச்சனை (உறுதியில்லை): %s\n\n"
+            + "உறுதியாகத் தெரியும் வரை எந்த மருந்தும் தெளிக்க வேண்டாம். "
+            + "தயவுசெய்து இலையை நல்ல வெளிச்சத்தில், அருகில் இருந்து மீண்டும் படம் எடுத்து அனுப்பவும்.\n\n"
+            + "குறிப்பு: " + KVK_TAMIL;
+    public static final String TENTATIVE_ENGLISH_FORMAT =
+            "I am not fully sure. What follows is only my best guess, not a confirmed result.\n\n"
+            + "Crop (guess): %s\n"
+            + "What is visible: %s\n"
+            + "Possible problem (not confirmed): %s\n\n"
+            + "Please do not spray any medicine until this is confirmed. "
+            + "Kindly send a close, well-lit photo of the affected leaf again.\n\n"
+            + "Note: " + KVK_ENGLISH;
+
+    /**
+     * For a LOW-confidence answer that still named a plant, visible symptoms and a possible problem: a fixed,
+     * clearly "not sure" reply built only from those three short values. It never contains a medicine, a
+     * treatment or a verified line. Null when the answer is not suitable (use the full not-sure reply then).
+     */
+    public static String tentativeMessage(String text, String language) {
+        if (!"low".equals(confidence(text))) return null;
+        if (containsAny(text, NOT_SURE_PHRASES)) return null;
+        String crop = crop(text);
+        String symptoms = lineValue(text, SYMPTOMS);
+        String disease = disease(text);
+        if (!usable(crop, 60) || !usable(symptoms, 220) || !usable(disease, 100)) return null;
+        for (String v : new String[]{crop, symptoms, disease}) {
+            if (containsAny(v, UNCLEAR_CROP_WORDS) || containsAny(v, TREATMENT_WORDS) || DOSE.matcher(v).find()) {
+                return null;
+            }
+        }
+        String format = "english".equals(language) ? TENTATIVE_ENGLISH_FORMAT : TENTATIVE_TAMIL_FORMAT;
+        return String.format(format, crop, symptoms, disease);
+    }
+
+    private static boolean usable(String value, int maxLength) {
+        return value != null && !value.isBlank() && value.length() <= maxLength;
     }
 
     /** Adds the "confirm with KVK" note to a confident answer (once). */
