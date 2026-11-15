@@ -1,0 +1,57 @@
+# ── Build output ─────────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+dist/
+build/
+coverage/
+node_modules/
+hs_err_pid*
+
+# ── Environment files & secrets ──────────────────────────────
+# Real values live only in these files. Commit the .example templates instead.
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# ── Database dumps & logs ────────────────────────────────────
+# Root-level dumps only: src/main/resources/data.sql (the seed data) must stay tracked.
+/*.sql
+*.dump
+logs.txt
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# ── Local tooling state ──────────────────────────────────────
+.vercel/
+.railway/
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# ── Python caches (leftovers from removed tooling) ───────────
+__pycache__/
+*.pyc
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Playwright MCP output ────────────────────────────────────
+.playwright-mcp/
+
+# ── Vendored third-party tooling (do not commit) ─────────────
+.claude/

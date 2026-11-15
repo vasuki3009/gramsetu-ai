@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Safety net: any URL (HTTP client exceptions embed the full request URL) and any
+         key=/token=/secret=/password= value is redacted from messages and stack traces.
+         Secrets are also never put in URLs (Gemini uses the x-goog-api-key header). -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %replace(%replace(%msg){'https?://[^\s"]+', '&lt;url&gt;'}){'(?i)(api[_-]?key|key|token|secret|password)=[^&amp;\s"]+', '$1=***'}%n%replace(%xEx){'https?://[^\s"]+', '&lt;url&gt;'}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Default (production): INFO only -->
+    <logger name="com.gramsetu" level="INFO" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+    <logger name="org.springframework.web.client" level="INFO" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- Development profile: show API call details -->
+    <springProfile name="dev">
+        <logger name="com.gramsetu" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+        </logger>
+        <logger name="org.springframework.web.client" level="INFO" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+        </logger>
+    </springProfile>
+
+    <!-- Suppress noisy Spring internals -->
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

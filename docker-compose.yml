@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────
+# GramSetu — local full stack: MySQL 8.0 + Spring Boot backend
+#
+# Usage:  copy .env.example to .env, fill it in, then  docker compose up --build
+# Every ${VAR:?...} below is REQUIRED and stops compose with a clear message if unset.
+# The frontend (gramsetu-app) is deployed separately (Vercel) and is not part of this file.
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  # ── 1. MySQL 8.0 ────────────────────────────────────────────
+  gramsetu-mysql:
+    image: mysql:8.0
+    container_name: gramsetu-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gramsetu}
+    ports:
+      # Bound to localhost only, so the database is not reachable from the network.
+      - "127.0.0.1:${MYSQL_HOST_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - gramsetu-network
+    healthcheck:
+      # $$ defers expansion to the container, so the password is not baked into the config.
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── 2. Spring Boot Backend ───────────────────────────────────
+  gramsetu-springboot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - CACHEBUST=${CACHEBUST:-1}
+    container_name: gramsetu-springboot
+    restart: unless-stopped
+    ports:
+      # The container listens on $PORT (default 8081), the same variable Railway injects.
+      - "${PORT:-8081}:${PORT:-8081}"
+    environment:
+      PORT: ${PORT:-8081}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+
+      # Database (talks to the mysql service by name)
+      SPRING_DATASOURCE_URL: jdbc:mysql://gramsetu-mysql:3306/${MYSQL_DATABASE:-gramsetu}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_SHOW_SQL: "false"
+
+      # AI providers (GROQ is optional: Gemini is used when it is empty)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
+      SARVAM_API_KEY: ${SARVAM_API_KEY:?Set SARVAM_API_KEY in .env}
+      SARVAM_TTS_MODEL: ${SARVAM_TTS_MODEL:-bulbul:v3}
+      SARVAM_STT_MODEL: ${SARVAM_STT_MODEL:-saaras:v3}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      GEMINI_FALLBACK_MODELS: ${GEMINI_FALLBACK_MODELS-gemini-3.6-flash,gemini-3.5-flash-lite}
+      AI_THINKING_LEVEL: ${AI_THINKING_LEVEL-low}
+      AI_READ_TIMEOUT_MS: ${AI_READ_TIMEOUT_MS:-25000}
+      AI_RETRY_MAX_ATTEMPTS: ${AI_RETRY_MAX_ATTEMPTS:-2}
+      AI_RETRY_BUDGET_MS: ${AI_RETRY_BUDGET_MS:-60000}
+
+      # Twilio / WhatsApp
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:?Set TWILIO_ACCOUNT_SID in .env}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:?Set TWILIO_AUTH_TOKEN in .env}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:?Set TWILIO_WHATSAPP_FROM in .env}
+      TWILIO_VALIDATE_SIGNATURE: ${TWILIO_VALIDATE_SIGNATURE:-true}
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:?Set APP_PUBLIC_BASE_URL in .env (the public HTTPS URL Twilio calls)}
+
+      # Cloudinary (hosts the TTS audio sent over WhatsApp)
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:?Set CLOUDINARY_CLOUD_NAME in .env}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:?Set CLOUDINARY_API_KEY in .env}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:?Set CLOUDINARY_API_SECRET in .env}
+
+      # CORS: exact origins allowed to call the API from a browser
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
+
+      # Abuse protection. The port is published directly (no reverse proxy), so X-Forwarded-For
+      # is NOT trusted by default here; behind a proxy use 1 (or more) instead.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-20}
+      RATE_LIMIT_TRUSTED_PROXY_HOPS: ${RATE_LIMIT_TRUSTED_PROXY_HOPS:-0}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-8MB}
+      MAX_AUDIO_BYTES: ${MAX_AUDIO_BYTES:-2097152}
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-8388608}
+      MAX_QUESTION_LENGTH: ${MAX_QUESTION_LENGTH:-1000}
+
+    healthcheck:
+      # The JRE image has no curl or wget, so use bash's /dev/tcp. Healthy = HTTP 200 from the public
+      # health endpoint (which answers 503 when the database or Twilio configuration is unusable).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/$${PORT:-8081} && printf 'GET /api/whatsapp/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+    depends_on:
+      gramsetu-mysql:
+        condition: service_healthy
+    networks:
+      - gramsetu-network
+
+# ─────────────────────────────────────────────────────────────
+# Named Volumes
+# ─────────────────────────────────────────────────────────────
+volumes:
+  mysql-data:
+    driver: local
+
+# ─────────────────────────────────────────────────────────────
+# Network
+# ─────────────────────────────────────────────────────────────
+networks:
+  gramsetu-network:
+    driver: bridge

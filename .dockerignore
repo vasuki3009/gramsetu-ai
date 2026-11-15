@@ -1,0 +1,36 @@
+# Maven build output
+target/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Git
+.git/
+.gitignore
+
+# Frontend dependencies and build output
+gramsetu-app/node_modules/
+gramsetu-app/build/
+gramsetu-app/dist/
+gramsetu-app/.next/
+
+# Python virtual environment and cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (never bake secrets into image)
+.env
+.env.*
+
+# Not needed to build the backend image
+scripts/
+*.sql
+logs.txt

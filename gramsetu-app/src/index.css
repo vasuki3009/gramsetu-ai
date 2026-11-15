@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-cream font-body text-body text-ink antialiased;
+    margin: 0;
+    overflow-x: hidden; /* safety net: the layout itself is built not to need it */
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-bold;
+    margin: 0;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  /* One focus ring that shows on light AND dark surfaces: white inner, ink outer. */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px #ffffff, 0 0 0 6px #14281d;
+  }
+
+  /* Skip link and main landmark focus should not draw a ring around the whole page. */
+  main:focus {
+    outline: none;
+    box-shadow: none;
+  }
+
+  img,
+  svg {
+    max-width: 100%;
+  }
+}
+
+/* ── Tamil text ───────────────────────────────────────────────────────────── */
+/* :where() keeps this rule at zero specificity so Tailwind font and leading classes win. */
+:where(:lang(ta), .tamil-text) {
+  font-family: 'Noto Sans Tamil', 'Latha', 'Vijaya', sans-serif;
+}
+
+/* ── Components ───────────────────────────────────────────────────────────── */
+@layer components {
+  /* Section reveal: one short fade-and-rise, once, when the section scrolls into view. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 480ms theme('transitionTimingFunction.out'),
+      transform 480ms theme('transitionTimingFunction.out');
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Skeleton loader: a soft green shimmer that sweeps across. */
+  .skeleton {
+    background: linear-gradient(90deg, #dcebd9 0%, #eef5ec 45%, #dcebd9 90%);
+    background-size: 200% 100%;
+  }
+
+  /* Ambient illustration motion is paused while the scene is off-screen. */
+  [data-paused='true'] .ambient {
+    animation-play-state: paused;
+  }
+}
+
+/* ── Motion: respect the user's setting ───────────────────────────────────── */
+/* Everything settles into its final, readable state: no animation, no hidden content. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
