@@ -1,6 +1,6 @@
 # GramSetu — a Tamil-first AI assistant for farmers
 
-[![CI](https://github.com/vasuki3009/gramsetu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vasuki3009/gramsetu/actions/workflows/ci.yml)
+[![CI](https://github.com/vasuki3009/gramsetu-ai/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vasuki3009/gramsetu-ai/actions/workflows/ci.yml)
 
 GramSetu (கிராம்சேது, "village bridge") lets a farmer ask a farming question **by voice, by text or with a photo of a sick
 crop**, on the **web** or on **WhatsApp**, and get a short, practical answer in **their own regional Tamil dialect**
@@ -193,8 +193,8 @@ On Gemini's free tier, answers often failed with 503 and 429 errors, and my firs
 [Twilio](https://www.twilio.com/try-twilio) and [Cloudinary](https://cloudinary.com). Groq is optional.
 
 ```bash
-git clone https://github.com/vasuki3009/gramsetu.git
-cd gramsetu
+git clone https://github.com/vasuki3009/gramsetu-ai.git
+cd gramsetu-ai
 cp .env.example .env        # then edit .env: replace every placeholder (see Configuration below)
 ```
 

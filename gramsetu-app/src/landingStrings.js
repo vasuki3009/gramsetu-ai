@@ -144,4 +144,4 @@ export const TECH_BADGES = [
   'Cloudinary',
 ]
 
-export const GITHUB_URL = 'https://github.com/vasuki3009/gramsetu'
+export const GITHUB_URL = 'https://github.com/vasuki3009/gramsetu-ai'
