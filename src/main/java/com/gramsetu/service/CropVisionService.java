@@ -156,8 +156,10 @@ public class CropVisionService {
             if (reason != null) {
                 String tentative = reason == CropDiagnosis.UnsureReason.LOW_CONFIDENCE
                         ? CropDiagnosis.tentativeMessage(geminiDiagnosis, language) : null;
-                // Reason code only - never the answer text.
-                log.info("Crop vision: unsure reason={} tentative={}", reason, tentative != null);
+                // Reason code and the label names found (text before a colon, max 10 x 20 chars) only -
+                // never the answer text or any value.
+                log.info("Crop vision: unsure reason={} tentative={} labels={}", reason, tentative != null,
+                        CropDiagnosis.labelsFound(geminiDiagnosis));
                 return new CropResponse(tentative != null ? tentative : CropDiagnosis.unsureMessage(language),
                         false, "", "", true);
             }
