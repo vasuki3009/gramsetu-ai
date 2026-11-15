@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
@@ -256,21 +257,39 @@ public class AIAdvisorService {
     }
 
     private Optional<String> generate(String systemPrompt, List<ChatTurn> history, String userPrompt) {
+        return runChain(buildChain(), target -> target.provider() == AiProvider.GEMINI
+                ? callGeminiApi(target.model(), level -> buildGeminiBody(systemPrompt, history, userPrompt, temperature, maxOutputTokens, level))
+                : callGroqApi(systemPrompt, history, userPrompt));
+    }
+
+    /**
+     * Photo + prompt (crop disease diagnosis) through the same Gemini chain and rules as the text answers: primary model,
+     * then GEMINI_FALLBACK_MODELS, the same per-call read timeout, retries, time budget, thinking level and output cap.
+     * Gemini only (Groq cannot read images). Empty when no key is set or every model fails. Neither the image nor the
+     * answer is logged.
+     */
+    public Optional<String> generateFromImage(String prompt, String mimeType, String base64Image) {
+        List<Target> chain = new ArrayList<>();
+        if (isKeyConfigured()) {
+            for (String m : geminiModels()) chain.add(new Target(AiProvider.GEMINI, m));
+        }
+        return runChain(chain, target -> callGeminiApi(target.model(),
+                level -> buildGeminiVisionBody(prompt, mimeType, base64Image, temperature, maxOutputTokens, level)));
+    }
+
+    private Optional<String> runChain(List<Target> chain, Function<Target, String> call) {
         long deadline = nowMs() + budgetMs;
-        for (Target target : buildChain()) {
-            Optional<String> text = tryTarget(target, systemPrompt, history, userPrompt, deadline);
+        for (Target target : chain) {
+            Optional<String> text = tryTarget(target, call, deadline);
             if (text.isPresent()) return text;
         }
         return Optional.empty();
     }
 
-    private Optional<String> tryTarget(Target target, String systemPrompt, List<ChatTurn> history, String userPrompt,
-                                       long deadline) {
+    private Optional<String> tryTarget(Target target, Function<Target, String> call, long deadline) {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                String text = target.provider() == AiProvider.GEMINI
-                        ? callGeminiApi(target.model(), systemPrompt, history, userPrompt)
-                        : callGroqApi(systemPrompt, history, userPrompt);
+                String text = call.apply(target);
                 if (text != null && !text.isBlank()) {
                     log.info("[AI] {} attempt {}/{}: 200 OK", target.label(), attempt, maxAttempts);
                     return Optional.of(text.trim());
@@ -333,7 +352,7 @@ public class AIAdvisorService {
     }
 
     @SuppressWarnings("rawtypes")
-    private String callGeminiApi(String model, String systemPrompt, List<ChatTurn> history, String userPrompt) {
+    private String callGeminiApi(String model, Function<String, Map<String, Object>> bodyForThinkingLevel) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("x-goog-api-key", apiKey);   // key in a header, never in the URL
@@ -341,13 +360,13 @@ public class AIAdvisorService {
         String level = thinkingLevel == null ? "" : thinkingLevel.trim();
         String url = GEMINI_BASE + model + ":generateContent";
         try {
-            Map<String, Object> body = buildGeminiBody(systemPrompt, history, userPrompt, temperature, maxOutputTokens, level);
+            Map<String, Object> body = bodyForThinkingLevel.apply(level);
             return extractGeminiText(restTemplate.postForEntity(url, new HttpEntity<>(body, headers), Map.class).getBody());
         } catch (HttpClientErrorException.BadRequest e) {
             if (level.isEmpty()) throw e;
             // The model may not accept this thinking level: ask once more without the thinking setting.
             log.warn("[AI] gemini {}: HTTP 400 with thinking level '{}', repeating without it", model, level);
-            Map<String, Object> body = buildGeminiBody(systemPrompt, history, userPrompt, temperature, maxOutputTokens, null);
+            Map<String, Object> body = bodyForThinkingLevel.apply(null);
             return extractGeminiText(restTemplate.postForEntity(url, new HttpEntity<>(body, headers), Map.class).getBody());
         }
     }
@@ -389,13 +408,6 @@ public class AIAdvisorService {
     /** Earlier turns go into {@code contents} before the new question; the assistant role is called "model" in Gemini. */
     static Map<String, Object> buildGeminiBody(String systemPrompt, List<ChatTurn> history, String userPrompt,
                                                double temperature, int maxTokens, String thinkingLevel) {
-        Map<String, Object> generationConfig = new HashMap<>();
-        generationConfig.put("temperature", temperature);
-        generationConfig.put("maxOutputTokens", maxTokens);
-        if (thinkingLevel != null && !thinkingLevel.isBlank()) {
-            generationConfig.put("thinkingConfig", Map.of("thinkingLevel", thinkingLevel.trim().toLowerCase()));
-        }
-
         Map<String, Object> body = new HashMap<>();
         body.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))));
         List<Map<String, Object>> contents = new ArrayList<>();
@@ -407,8 +419,30 @@ public class AIAdvisorService {
         }
         contents.add(Map.of("role", "user", "parts", List.of(Map.of("text", userPrompt))));
         body.put("contents", contents);
-        body.put("generationConfig", generationConfig);
+        body.put("generationConfig", generationConfig(temperature, maxTokens, thinkingLevel));
         return body;
+    }
+
+    /** One user turn made of the prompt text and the photo (inline base64). Same generation settings as text answers. */
+    static Map<String, Object> buildGeminiVisionBody(String prompt, String mimeType, String base64Image,
+                                                     double temperature, int maxTokens, String thinkingLevel) {
+        List<Map<String, Object>> parts = List.of(
+                Map.of("text", prompt),
+                Map.of("inline_data", Map.of("mime_type", mimeType, "data", base64Image)));
+        Map<String, Object> body = new HashMap<>();
+        body.put("contents", List.of(Map.of("role", "user", "parts", parts)));
+        body.put("generationConfig", generationConfig(temperature, maxTokens, thinkingLevel));
+        return body;
+    }
+
+    private static Map<String, Object> generationConfig(double temperature, int maxTokens, String thinkingLevel) {
+        Map<String, Object> generationConfig = new HashMap<>();
+        generationConfig.put("temperature", temperature);
+        generationConfig.put("maxOutputTokens", maxTokens);
+        if (thinkingLevel != null && !thinkingLevel.isBlank()) {
+            generationConfig.put("thinkingConfig", Map.of("thinkingLevel", thinkingLevel.trim().toLowerCase()));
+        }
+        return generationConfig;
     }
 
     static Map<String, Object> buildGroqBody(String systemPrompt, String userPrompt, double temperature, int maxTokens) {

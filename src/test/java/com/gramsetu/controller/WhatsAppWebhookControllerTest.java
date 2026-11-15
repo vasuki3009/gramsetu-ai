@@ -545,6 +545,57 @@ class WhatsAppWebhookControllerTest {
         }
 
         @Test
+        @DisplayName("Unsure result → only the not-sure message (with KVK line), no TTS, no upload, no medicine")
+        void imageMessage_unsure_sendsOnlyNotSureMessage_noAudio() throws Exception {
+            when(restTemplate.exchange(eq(IMAGE_URL), eq(HttpMethod.GET), any(), eq(byte[].class)))
+                .thenReturn(ResponseEntity.ok(FAKE_IMAGE));
+            when(cropVisionService.analyzeCropImage(any(), anyString()))
+                .thenReturn(new CropResponse(com.gramsetu.util.CropDiagnosis.UNSURE_TAMIL, false, "", "", true));
+
+            assertAccepted(postMedia(FARMER_NUMBER, IMAGE_URL, "image/jpeg"));
+
+            verifyTextSent(FARMER_NUMBER, "உறுதியாகத் தெரியவில்லை");
+            verifyTextSent(FARMER_NUMBER, "KVK");
+            verify(messageSender, never()).send(eq(FARMER_NUMBER),
+                    org.mockito.ArgumentMatchers.argThat((String t) -> t != null && (t.contains("நோய்:") || t.contains("மருந்து:")
+                            || t.contains("தீவிரம்:") || t.contains("சிகிச்சை:"))), any());
+            verifyNoMediaSent();
+            verifyNoInteractions(sarvamService, cloudinaryService);
+        }
+
+        @Test
+        @DisplayName("Confident result → crop, model's own severity, and a KVK line; no invented severity")
+        void imageMessage_confident_showsCropAndKvk_andNoInventedSeverity() throws Exception {
+            when(restTemplate.exchange(eq(IMAGE_URL), eq(HttpMethod.GET), any(), eq(byte[].class)))
+                .thenReturn(ResponseEntity.ok(FAKE_IMAGE));
+            // Contains words the old keyword guesser treated as "severe" (கடுமையான) but no தீவிரம்: line.
+            when(cropVisionService.analyzeCropImage(any(), anyString()))
+                .thenReturn(diagnosis("பயிர்: தக்காளி\nநம்பிக்கை: high\nநோய்: இலை கருகல்\n"
+                        + "அறிகுறிகள்: கடுமையான புள்ளிகள்\nசிகிச்சை: இலைகளை அகற்றவும்\nமருந்து: மான்கோசெப்"));
+
+            assertAccepted(postMedia(FARMER_NUMBER, IMAGE_URL, "image/jpeg"));
+
+            verifyTextSent(FARMER_NUMBER, "தக்காளி");
+            verifyTextSent(FARMER_NUMBER, "KVK");
+            verify(messageSender, never()).send(eq(FARMER_NUMBER),
+                    org.mockito.ArgumentMatchers.argThat((String t) -> t != null && t.contains("தீவிரம்")), any());
+        }
+
+        @Test
+        @DisplayName("Confident result with a model-supplied தீவிரம் line → that severity is shown")
+        void imageMessage_confident_showsModelSeverity() throws Exception {
+            when(restTemplate.exchange(eq(IMAGE_URL), eq(HttpMethod.GET), any(), eq(byte[].class)))
+                .thenReturn(ResponseEntity.ok(FAKE_IMAGE));
+            when(cropVisionService.analyzeCropImage(any(), anyString()))
+                .thenReturn(diagnosis("பயிர்: தக்காளி\nநம்பிக்கை: high\nநோய்: இலை கருகல்\nதீவிரம்: லேசானது\n"
+                        + "சிகிச்சை: இலைகளை அகற்றவும்\nமருந்து: மான்கோசெப்"));
+
+            assertAccepted(postMedia(FARMER_NUMBER, IMAGE_URL, "image/jpeg"));
+
+            verifyTextSent(FARMER_NUMBER, "தீவிரம்:* லேசானது");
+        }
+
+        @Test
         @DisplayName("Image larger than MAX_IMAGE_BYTES → treated as a failed download, CropVision NOT called")
         void imageMessage_tooLarge_cropVisionNotCalled() throws Exception {
             when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(), eq(byte[].class)))
