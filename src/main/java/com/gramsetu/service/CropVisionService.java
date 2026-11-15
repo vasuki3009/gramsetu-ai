@@ -1,28 +1,26 @@
 package com.gramsetu.service;
 
+import com.gramsetu.util.CropDiagnosis;
+import com.gramsetu.util.ImageResizer;
 import com.gramsetu.util.LogSafe;
 import com.gramsetu.dto.CropResponse;
 import com.gramsetu.model.CropAdvisory;
 import com.gramsetu.repository.CropAdvisoryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.Base64;
-import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 public class CropVisionService {
-
-    @Value("${gemini.api.key}")
-    private String apiKey;
 
     @Autowired
     private CropAdvisoryRepository advisoryRepo;
@@ -30,117 +28,121 @@ public class CropVisionService {
     @Autowired
     private SarvamSpeechService sarvamService;
 
-    private RestTemplate restTemplate;
+    /** Model chain, retries, timeouts, thinking level and output cap are shared with the text answers. */
+    @Autowired
+    private AIAdvisorService aiAdvisor;
 
-    public CropVisionService() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(10_000);
-        factory.setReadTimeout(60_000); // Vision API needs longer — large base64 payload
-        this.restTemplate = new RestTemplate(factory);
-    }
-
-    /** Same model setting as the text answers (GEMINI_MODEL). */
-    @Value("${gemini.model:" + AIAdvisorService.DEFAULT_GEMINI_MODEL + "}")
-    private String geminiModel = AIAdvisorService.DEFAULT_GEMINI_MODEL;
-
-    private String geminiUrl() {
-        return "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel.trim() + ":generateContent";
-    }
-
-    private boolean isKeyConfigured() {
-        return apiKey != null && !apiKey.isBlank()
-                && !apiKey.toUpperCase().startsWith("YOUR_");
-    }
-
-    @SuppressWarnings("unchecked")
     public CropResponse analyzeCropImage(byte[] imageBytes, String language) {
-        if (!isKeyConfigured()) {
-            log.warn("Gemini API key not configured – returning demo crop response. " +
+        if (!aiAdvisor.isKeyConfigured()) {
+            log.warn("Gemini API key not configured – crop analysis unavailable. " +
                      "Set gemini.api.key in application.properties");
-            return getDemoCropResponse(language);
+            return unavailableResponse(language);
         }
-        String mimeType = detectMimeType(imageBytes);
-        log.debug("Analyzing crop image: {} bytes, MIME: {}", imageBytes.length, mimeType);
         try {
+            // Web uploads can be several MB; WhatsApp photos are already small. Both are capped at 1024 px.
+            imageBytes = ImageResizer.limitDimension(imageBytes, ImageResizer.MAX_DIMENSION);
+            String mimeType = detectMimeType(imageBytes);
+            log.debug("Analyzing crop image: {} bytes, MIME: {}", imageBytes.length, mimeType);
             String base64Image = Base64.getEncoder().encodeToString(imageBytes);
 
             String prompt = "english".equals(language) ? """
-                    You are an expert agricultural scientist specialising in Tamil Nadu crops
-                    (tomato, beans, paddy, ragi, groundnut). Carefully examine this crop image.
-                    Respond ONLY in this exact 6-section format in English:
+                    You are an expert agricultural scientist helping farmers in Tamil Nadu.
+                    Look carefully at this photo.
 
-                    Disease: [full disease name with scientific name if known]
+                    Step 1: Identify the crop you see. Do NOT assume a crop and do NOT default to
+                    paddy/rice or any other crop. It can be any plant.
+                    Step 2: State your confidence: high, medium or low.
+                    Step 3: Diagnose a disease ONLY for the crop you identified, and only from what is
+                    visible in the photo.
+
+                    If the photo is not a crop leaf or plant, is blurry, too dark, too far away, shows
+                    several different plants, or your confidence is low, do NOT guess. Reply with ONLY
+                    these three lines and nothing else:
+                    Crop: [crop name, or "unclear" / "not a crop leaf"]
+                    Confidence: low
+                    Result: I am not sure.
+                    In that case never name any disease, treatment or medicine.
+
+                    Otherwise reply ONLY in this exact format in English:
+
+                    Crop: [crop name]
+                    Confidence: [one English word: high or medium]
+                    Disease: [full disease name with scientific name if known, for that crop]
+                    Severity: [mild / moderate / severe - only if you can judge it from the photo, otherwise leave this line out]
                     Symptoms: [2-3 visible symptoms observed in this image]
-                    Cause: [root cause — fungus / bacteria / virus / pest / nutrient deficiency]
+                    Cause: [root cause - fungus / bacteria / virus / pest / nutrient deficiency]
                     Treatment:
-                    1. [immediate action — remove/isolate]
+                    1. [immediate action - remove/isolate]
                     2. [chemical or biological treatment with dosage]
                     3. [follow-up action after 7-10 days]
                     Prevention:
                     1. [preventive cultural practice]
                     2. [preventive spray or seed treatment]
-                    Medicine: [specific pesticide / fungicide name + dosage available in local agri shop]
+                    Medicine: [specific pesticide / fungicide name only; follow the label dosage]
 
-                    IMPORTANT: Reply ONLY in the above format. No extra text before or after.
+                    No extra text before or after.
                     """ : """
-                    நீங்கள் தமிழ்நாடு வேளாண் விஞ்ஞானி. இந்த பயிர் படத்தை கவனமாக ஆய்வு செய்யவும்.
+                    நீங்கள் தமிழ்நாடு வேளாண் விஞ்ஞானி. இந்த படத்தை கவனமாக ஆய்வு செய்யவும்.
 
-                    முதலில் இந்த வேறுபாடுகளை கவனமாக பாருங்கள்:
+                    படி 1: படத்தில் எந்தப் பயிர் தெரிகிறது என்று முதலில் அடையாளம் காணவும். எந்தப் பயிரையும்
+                    (நெல் உட்பட) முன்கூட்டியே ஊகிக்க வேண்டாம். எந்தச் செடியாகவும் இருக்கலாம்.
+                    படி 2: உங்கள் நம்பிக்கை அளவைச் சொல்லவும்: high, medium அல்லது low.
+                    படி 3: நீங்கள் அடையாளம் கண்ட அந்தப் பயிருக்கு மட்டும், படத்தில் தெரிவதை வைத்து மட்டும் நோயைக் கண்டறியவும்.
+
+                    வேறுபாடுகள்:
                     - புள்ளிகள், கருப்பு/பழுப்பு திட்டுகள், எரிந்த விளிம்புகள் = பூஞ்சை அல்லது பாக்டீரியா நோய்
                     - சீரற்ற மஞ்சள் நிறம் (வரிகள் இல்லாமல்) = வைரஸ் நோய்
                     - சீரான வெளிர் மஞ்சள் நிறம் (புள்ளிகள் இல்லாமல்) = சத்துக்குறைபாடு
                     - இலையில் துளைகள், கடித்த தடங்கள் = பூச்சி தாக்குதல்
-                    - வேர் அருகே கருப்பு அழுகல் = நேரடி நோய்
 
-                    கட்டாயம் கீழ்க்கண்ட 6 பிரிவு வடிவத்தில் தமிழில் மட்டுமே பதில் சொல்லவும்:
+                    படம் பயிர் இலை இல்லை, மங்கலாக / இருட்டாக / தொலைவில் உள்ளது, பல செடிகள் கலந்துள்ளன, அல்லது உங்கள்
+                    நம்பிக்கை குறைவு என்றால் ஊகிக்க வேண்டாம். அப்போது இந்த மூன்று வரிகளை மட்டும் எழுதவும்:
+                    பயிர்: [பயிரின் பெயர், அல்லது "தெளிவில்லை" / "பயிர் இலை இல்லை"]
+                    நம்பிக்கை: low
+                    முடிவு: எனக்கு உறுதியாகத் தெரியவில்லை.
+                    அப்போது எந்த நோய், சிகிச்சை, மருந்தின் பெயரையும் எழுதக் கூடாது.
 
-                    நோய்: [சரியான நோயின் பெயர் தமிழிலும் ஆங்கிலத்திலும்]
-                    அறிகுறிகள்: [இந்த படத்தில் தெரியும் 2-3 குறிப்பிட்ட அறிகுறிகள் — நிறம், வடிவம், இடம்]
-                    காரணம்: [மூல காரணம் — பூஞ்சான் / பாக்டீரியா / வைரஸ் / பூச்சி / சத்துக்குறைபாடு என்று தெளிவாக சொல்லவும்]
+                    இல்லையெனில், கீழ்க்கண்ட வடிவத்தில் தமிழில் மட்டுமே பதில் சொல்லவும்:
+
+                    பயிர்: [பயிரின் பெயர்]
+                    நம்பிக்கை: [ஒரு ஆங்கிலச் சொல்: high அல்லது medium]
+                    நோய்: [அந்தப் பயிருக்கான சரியான நோயின் பெயர் தமிழிலும் ஆங்கிலத்திலும்]
+                    தீவிரம்: [லேசானது / மிதமானது / கடுமையானது - படத்தில் இருந்து மதிப்பிட முடிந்தால் மட்டும்; இல்லையெனில் இந்த வரியை விட்டுவிடவும்]
+                    அறிகுறிகள்: [இந்த படத்தில் தெரியும் 2-3 குறிப்பிட்ட அறிகுறிகள் - நிறம், வடிவம், இடம்]
+                    காரணம்: [மூல காரணம் - பூஞ்சான் / பாக்டீரியா / வைரஸ் / பூச்சி / சத்துக்குறைபாடு]
                     சிகிச்சை:
                     1. [உடனடி நடவடிக்கை]
-                    2. [சரியான மருந்து + அளவு — காரணத்திற்கு ஏற்ப: பூஞ்சானுக்கு fungicide, பாக்டீரியாவுக்கு bactericide, சத்துக்குறைபாட்டிற்கு உரம்]
+                    2. [சரியான மருந்து வகை - பூஞ்சானுக்கு fungicide, பாக்டீரியாவுக்கு bactericide, சத்துக்குறைபாட்டிற்கு உரம்]
                     3. [7-10 நாட்களில் மேற்கொள்ள வேண்டியது]
                     தடுப்பு முறைகள்:
                     1. [நடைமுறை தடுப்பு]
                     2. [தடுப்பு மருந்து அல்லது இயற்கை முறை]
-                    மருந்து: [மருந்தின் பெயர் மட்டும். அளவு எழுத வேண்டாம்; மருந்து டப்பாவில் உள்ள அளவைப் பின்பற்றி, வேளாண் அலுவலகத்தில் உறுதி செய்யவும்]
+                    மருந்து: [மருந்தின் பெயர் மட்டும். அளவு எழுத வேண்டாம்; மருந்து டப்பாவில் உள்ள அளவைப் பின்பற்றவும்]
 
-                    முக்கியம்: படத்தில் புள்ளிகள் அல்லது திட்டுகள் தெரிந்தால் கட்டாயம் நோயாக கண்டறியவும் — சத்துக்குறைபாடாக தவறாக கண்டறியாதீர்கள்.
-                    மேற்கண்ட 6 பிரிவு வடிவத்தில் மட்டுமே பதில் சொல்லவும். வேறு எந்த உரையும் வேண்டாம்.
+                    வேறு எந்த உரையும் வேண்டாம்.
                     """;
 
-            Map<String, Object> textPart = Map.of("text", prompt);
-            Map<String, Object> imagePart = Map.of(
-                    "inline_data", Map.of(
-                            "mime_type", mimeType,
-                            "data", base64Image
-                    )
-            );
-
-            Map<String, Object> requestBody = Map.of(
-                    "contents", List.of(
-                            Map.of("parts", List.of(textPart, imagePart))
-                    )
-            );
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("x-goog-api-key", apiKey);
-            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<Map> response = restTemplate.postForEntity(
-                    geminiUrl(),
-                    requestEntity,
-                    Map.class
-            );
-
-            log.debug("Gemini Vision response status: {}", response.getStatusCode());
-
-            String geminiDiagnosis = extractTextFromGeminiResponse(response.getBody(), language);
+            // Retries, fallback models and the overall deadline happen inside; empty means every model failed.
+            String geminiDiagnosis = aiAdvisor.generateFromImage(prompt, mimeType, base64Image).orElse(null);
+            if (geminiDiagnosis == null || geminiDiagnosis.isBlank()) {
+                log.warn("Crop vision: no model produced a diagnosis - returning the could-not-analyse message");
+                return unavailableResponse(language);
+            }
             log.debug("Gemini crop diagnosis received ({} chars)", geminiDiagnosis.length());
 
-            Optional<CropAdvisory> advisory = findMatchingAdvisory(geminiDiagnosis, language);
+            // Show a diagnosis only when the model named the crop with medium/high confidence.
+            if (CropDiagnosis.isUnsure(geminiDiagnosis)) {
+                log.info("Crop vision: model unsure or photo unclear - returning the not-sure message");
+                return new CropResponse(CropDiagnosis.unsureMessage(language), false, "", "", true);
+            }
+
+            // Verified only when BOTH the crop and the disease match one advisory entry.
+            Optional<CropAdvisory> advisory = findMatchingAdvisory(geminiDiagnosis);
+            if (advisory.isPresent()) {
+                geminiDiagnosis = CropDiagnosis.withVerifiedSolution(
+                        geminiDiagnosis, advisory.get().getVerifiedSolution(), language);
+            }
+            geminiDiagnosis = CropDiagnosis.withKvkNote(geminiDiagnosis, language);
 
             String audioBase64 = "";
             if (!"english".equals(language)) {
@@ -160,7 +162,7 @@ public class CropVisionService {
 
         } catch (Exception e) {
             log.error("Crop vision analysis error: {}", LogSafe.error(e));
-            return getDemoCropResponse(language);
+            return unavailableResponse(language);
         }
     }
 
@@ -179,88 +181,67 @@ public class CropVisionService {
         return "image/jpeg";
     }
 
-    private CropResponse getDemoCropResponse(String language) {
-        if ("english".equals(language)) {
-            String diagnosis = "Disease: Blast Disease (Magnaporthe oryzae)\n" +
-                    "Symptoms: Brown lesions with grey centres on leaves; spindle-shaped spots on stems.\n" +
-                    "Cause: Fungal infection — Magnaporthe oryzae, spread by wind and rain splash.\n" +
-                    "Treatment:\n" +
-                    "1. Remove and destroy all infected leaves and stems immediately.\n" +
-                    "2. Spray Tricyclazole 75 WP at 0.6 g/litre water every 10 days.\n" +
-                    "3. After 10 days check for new lesions; repeat spray if needed.\n" +
-                    "Prevention:\n" +
-                    "1. Use disease-resistant varieties; avoid excessive nitrogen fertiliser.\n" +
-                    "2. Treat seeds with Carbendazim 2 g/kg before sowing.\n" +
-                    "Medicine: Tricyclazole 75 WP – 0.6 g/litre (available at local agri shops)";
-            return new CropResponse(diagnosis, false, "AI Recommendation", "");
-        }
-        String diagnosis = "நோய்: பிளாஸ்ட் நோய் (Blast Disease — Magnaporthe oryzae)\n" +
-                "அறிகுறிகள்: இலைகளில் நடுவில் சாம்பல் நிறமும் விளிம்பில் பழுப்பு நிறமும் கொண்ட " +
-                "வெட்டு வடிவ புள்ளிகள்; தண்டில் கருப்பு வளையங்கள்.\n" +
-                "காரணம்: மாக்னபோர்தி ஓரைசே பூஞ்சான் — காற்று மற்றும் மழை நீர் தெறிப்பால் பரவும்.\n" +
-                "சிகிச்சை:\n" +
-                "1. பாதிக்கப்பட்ட இலை, தண்டுகளை உடனடியாக கிள்ளி எடுத்து வயலுக்கு வெளியே எரிக்கவும்.\n" +
-                "2. ட்ரைசைக்கிள்சோல் 75 WP 0.6 கிராம்/லிட்டர் தண்ணீரில் கலந்து 10 நாட்களுக்கு ஒருமுறை தெளிக்கவும்.\n" +
-                "3. 10 நாட்களுக்கு பிறகு புதிய புள்ளிகள் இருந்தால் மீண்டும் தெளிக்கவும்.\n" +
-                "தடுப்பு முறைகள்:\n" +
-                "1. நோய் எதிர்ப்பு திறன் மிக்க ரகங்களைப் பயன்படுத்தவும்; அதிக தழை சத்து இடாதீர்கள்.\n" +
-                "2. விதை நேர்த்தி: கார்பெண்டாசிம் 2 கிராம்/கிலோ விதை கலந்து விதைக்கவும்.\n" +
-                "மருந்து: ட்ரைசைக்கிள்சோல் 75 WP – 0.6 கிராம்/லிட்டர் (உள்ளூர் வேளாண் கடையில் கிடைக்கும்)";
-        return new CropResponse(diagnosis, false, "AI பரிந்துரை", "");
+    /** Honest "could not analyse" answer - never a made-up diagnosis. */
+    private CropResponse unavailableResponse(String language) {
+        return new CropResponse(CropDiagnosis.unavailableMessage(language), false, "", "", true);
     }
 
-    @SuppressWarnings("unchecked")
-    private String extractTextFromGeminiResponse(Map<String, Object> responseBody, String language) {
-        if (responseBody == null) {
-            log.warn("Gemini returned null response body");
-            return "சேவை தற்காலிகமாக நிறுத்தப்பட்டுள்ளது.";
-        }
+    /** Tamil / alternative names for the crops in the advisory table (lower-case token -> table crop name). */
+    private static final Map<String, String> CROP_ALIASES = Map.ofEntries(
+            Map.entry("தக்காளி", "tomato"),
+            Map.entry("மாம்பழம்", "mango"), Map.entry("மாமரம்", "mango"), Map.entry("மா", "mango"),
+            Map.entry("நிலக்கடலை", "groundnut"), Map.entry("வேர்க்கடலை", "groundnut"),
+            Map.entry("peanut", "groundnut"),
+            Map.entry("மஞ்சள்", "turmeric"),
+            Map.entry("கத்தரிக்காய்", "brinjal"), Map.entry("கத்திரிக்காய்", "brinjal"),
+            Map.entry("eggplant", "brinjal"), Map.entry("aubergine", "brinjal"));
+
+    private static final Pattern NON_LETTER = Pattern.compile("[^\\p{L}\\p{M}]+");
+
+    /**
+     * Strict match: an advisory counts only if the crop the model named equals the advisory's crop
+     * (whole word, English or Tamil alias) AND the model's disease line contains the advisory's disease
+     * name. A crop-only or disease-only match is not verified.
+     */
+    Optional<CropAdvisory> findMatchingAdvisory(String diagnosis) {
+        if (diagnosis == null) return Optional.empty();
         try {
-            List<Map<String, Object>> candidates =
-                    (List<Map<String, Object>>) responseBody.get("candidates");
-            if (candidates != null && !candidates.isEmpty()) {
-                String finishReason = (String) candidates.get(0).get("finishReason");
-                if ("SAFETY".equals(finishReason) || "RECITATION".equals(finishReason)) {
-                    log.warn("Gemini Vision blocked: finishReason={}", finishReason);
-                    return getDemoCropResponse(language).getDiagnosis();
-                }
-                Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
-                List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
-                if (parts != null && !parts.isEmpty()) {
-                    return (String) parts.get(0).get("text");
-                }
+            String crop = CropDiagnosis.crop(diagnosis);
+            String disease = CropDiagnosis.disease(diagnosis);
+            if (crop == null || crop.isBlank() || disease == null || disease.isBlank()) return Optional.empty();
+
+            String diseaseNorm = normalize(disease);
+            Set<String> cropNames = new LinkedHashSet<>();
+            for (String token : NON_LETTER.split(crop.toLowerCase(Locale.ROOT))) {
+                if (token.isBlank()) continue;
+                cropNames.add(token);
+                String alias = CROP_ALIASES.get(token);
+                if (alias != null) cropNames.add(alias);
             }
-            log.warn("Gemini Vision returned no usable candidates");   // the body is not logged: it may hold model output
-        } catch (Exception e) {
-            log.warn("Error parsing Gemini Vision response: {}", LogSafe.error(e));
-        }
-        return "சேவை தற்காலிகமாக நிறுத்தப்பட்டுள்ளது.";
-    }
-
-    private Optional<CropAdvisory> findMatchingAdvisory(String geminiDiagnosis, String language) {
-        if (geminiDiagnosis == null) return Optional.empty();
-        try {
-            String[] lines = geminiDiagnosis.split("\n");
-            for (String line : lines) {
-                if (line.contains("நோய்:") || line.contains("Disease:")) {
-                    String diseasePart = line.replace("நோய்:", "").replace("Disease:", "").trim();
-                    if (!diseasePart.isEmpty()) {
-                        String[] diseaseWords = diseasePart.split(" ");
-                        for (String word : diseaseWords) {
-                            if (word.length() > 3) {
-                                Optional<CropAdvisory> found =
-                                        advisoryRepo.findByDiseaseNameContainingIgnoreCase(word);
-                                if (found.isPresent()) {
-                                    return found;
-                                }
-                            }
-                        }
-                    }
+            for (String cropName : cropNames) {
+                for (CropAdvisory a : advisoryRepo.findByCropTypeIgnoreCase(cropName)) {
+                    if (diseaseMatches(a, diseaseNorm)) return Optional.of(a);
                 }
             }
         } catch (Exception e) {
             log.warn("Could not find matching advisory: {}", LogSafe.error(e));
         }
         return Optional.empty();
+    }
+
+    /** Full advisory disease name, or that name without its leading crop word, appears in the model's disease. */
+    private static boolean diseaseMatches(CropAdvisory a, String diseaseNorm) {
+        if (a.getDiseaseName() == null || a.getDiseaseName().isBlank()) return false;
+        String name = normalize(a.getDiseaseName());
+        if (diseaseNorm.contains(name)) return true;
+        String crop = a.getCropType() == null ? "" : normalize(a.getCropType());
+        if (!crop.isEmpty() && name.startsWith(crop + " ")) {
+            return diseaseNorm.contains(name.substring(crop.length() + 1));
+        }
+        return false;
+    }
+
+    private static String normalize(String s) {
+        return NON_LETTER.matcher(s.toLowerCase(Locale.ROOT)).replaceAll(" ").trim();
     }
 }

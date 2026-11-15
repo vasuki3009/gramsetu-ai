@@ -3,6 +3,7 @@ package com.gramsetu.controller;
 import com.gramsetu.config.AsyncConfig;
 import com.gramsetu.service.WhatsAppMessageSender;
 import com.gramsetu.util.AnswerLanguage;
+import com.gramsetu.util.CropDiagnosis;
 import com.gramsetu.util.LogSafe;
 import com.gramsetu.config.TwilioConfig;
 import com.gramsetu.dto.CropResponse;
@@ -29,10 +30,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -41,7 +38,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
-import javax.imageio.ImageIO;
 
 @RestController
 @RequestMapping("/api/whatsapp")
@@ -546,12 +542,15 @@ public class WhatsAppWebhookController {
         }
         log.info("[WhatsApp] Image downloaded: {} bytes", imageBytes.length);
 
-        // Resize image to 1024px max dimension to speed up Gemini processing
-        imageBytes = resizeImage(imageBytes, 1024);
-
+        // CropVisionService shrinks the photo (ImageResizer) before sending it to Gemini.
         CropResponse result = cropVisionService.analyzeCropImage(imageBytes, LANGUAGE);
         log.info("[WhatsApp] Crop diagnosis complete — verified={} source={}",
                 result.isVerified(), result.getVerifiedSource());
+
+        // Unsure / unavailable: send only the fixed message (no disease, no medicine), no audio.
+        if (result.isUnsure()) {
+            return new AudioReply("🌿 *பயிர் நோய் கண்டறிதல்*\n\n" + result.getDiagnosis(), null);
+        }
 
         String diagnosis = formatCropResponse(result);
 
@@ -560,15 +559,15 @@ public class WhatsAppWebhookController {
             log.info("[WhatsApp] Generating TTS for crop diagnosis...");
             String detectedDialect = "kongu";
 
-            // Build TTS summary — disease + severity + all treatment + prevention
+            // Build TTS summary — disease + (model's own severity, if any) + treatment + prevention
             String disease = extractSection(result.getDiagnosis(), "நோய்:", "நோய் :");
-            String severity = inferSeverity(result.getDiagnosis());
+            String severity = extractSection(result.getDiagnosis(), "தீவிரம்:", "தீவிரம் :");
             String treatment = extractSection(result.getDiagnosis(), "சிகிச்சை:", "சிகிச்சை :");
             String prevention = extractSection(result.getDiagnosis(), "தடுப்பு முறைகள்:", "தடுப்பு முறைகள் :");
 
             String ttsText = "நோய் கண்டறியப்பட்டது. " +
                     (!disease.isEmpty() ? "நோய்: " + disease + ". " : "") +
-                    "தீவிரம்: " + severity.replaceAll("[🔴🟡🟢]", "").trim() + ". " +
+                    (!severity.isEmpty() ? "தீவிரம்: " + severity + ". " : "") +
                     (!treatment.isEmpty() ? "சிகிச்சை முறை: " + treatment.replaceAll("\n", ". ") + ". " : "") +
                     (!prevention.isEmpty() ? "தடுப்பு முறை: " + prevention.replaceAll("\n", ". ") : "");
 
@@ -588,34 +587,6 @@ public class WhatsAppWebhookController {
         }
 
         return new AudioReply(diagnosis, ttsAudioUrl);
-    }
-
-    private byte[] resizeImage(byte[] imageBytes, int maxDimension) {
-        try {
-            BufferedImage original = ImageIO.read(new ByteArrayInputStream(imageBytes));
-            int width = original.getWidth();
-            int height = original.getHeight();
-
-            if (width <= maxDimension && height <= maxDimension) {
-                return imageBytes; // Already small enough
-            }
-
-            double scale = (double) maxDimension / Math.max(width, height);
-            int newWidth = (int) (width * scale);
-            int newHeight = (int) (height * scale);
-
-            BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
-            Graphics2D g = resized.createGraphics();
-            g.drawImage(original, 0, 0, newWidth, newHeight, null);
-            g.dispose();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(resized, "jpg", baos);
-            return baos.toByteArray();
-        } catch (Exception e) {
-            log.warn("[WhatsApp] Image resize failed, using original: {}", LogSafe.error(e));
-            return imageBytes;
-        }
     }
 
     private String formatVoiceResponse(String raw) {
@@ -645,20 +616,33 @@ public class WhatsAppWebhookController {
         String treatment  = extractSection(raw, "சிகிச்சை:", "சிகிச்சை :");
         String prevention = extractSection(raw, "தடுப்பு முறைகள்:", "தடுப்பு முறைகள் :");
         String medicine   = extractSection(raw, "மருந்து:", "மருந்து :");
-
-        String severity = inferSeverity(raw);
+        String crop       = extractSection(raw, "பயிர்:", "பயிர் :");
+        String confidence = extractSection(raw, "நம்பிக்கை:", "நம்பிக்கை :");
+        String severity   = extractSection(raw, "தீவிரம்:", "தீவிரம் :");   // only what the model itself said
+        String note       = extractSection(raw, "குறிப்பு:", "குறிப்பு :");
+        String verifiedRx = extractSection(raw, CropDiagnosis.VERIFIED_LABEL_TAMIL);   // advisory solution (verified match only)
 
         StringBuilder sb = new StringBuilder();
         sb.append("🌿 *பயிர் நோய் கண்டறிதல்*\n");
         sb.append("─────────────────────\n\n");
+
+        // Crop + confidence (model's own)
+        if (!crop.isEmpty()) {
+            sb.append("🌾 *பயிர்:* ").append(crop);
+            if (!confidence.isEmpty()) sb.append(" (").append(confidence).append(")");
+            sb.append("\n");
+        }
 
         // Disease name
         if (!disease.isEmpty()) {
             sb.append("🦠 *நோய்:* ").append(disease).append("\n");
         }
 
-        // Severity badge
-        sb.append("⚠️ *தீவிரம்:* ").append(severity).append("\n\n");
+        // Severity: shown only when the model returned one
+        if (!severity.isEmpty()) {
+            sb.append("⚠️ *தீவிரம்:* ").append(severity).append("\n");
+        }
+        sb.append("\n");
 
         // Treatment steps
         if (!treatment.isEmpty()) {
@@ -675,10 +659,18 @@ public class WhatsAppWebhookController {
             sb.append("💉 *மருந்து:* ").append(medicine).append("\n");
         }
 
+        // Verified advisory solution (replaces the model's medicine on a strict crop+disease match)
+        if (result.isVerified() && !verifiedRx.isEmpty()) {
+            sb.append("✅ *TNAU பரிந்துரை:* ").append(verifiedRx).append("\n");
+        }
+
         // Verified source badge
         if (result.isVerified()) {
             sb.append("\n✅ *ஆதாரம்:* ").append(result.getVerifiedSource());
         }
+
+        // Always: confirm with the local agriculture officer / KVK
+        sb.append("\n\n📞 *குறிப்பு:* ").append(note.isEmpty() ? CropDiagnosis.KVK_TAMIL : note);
 
         // Fall back to raw diagnosis if parsing extracted nothing useful
         if (disease.isEmpty() && treatment.isEmpty()) {
@@ -699,12 +691,17 @@ public class WhatsAppWebhookController {
     private String extractSection(String text, String... labels) {
         // All Tamil section headers we know about — used as stop markers
         String[] allHeaders = {
+            "பயிர்:", "பயிர் :",
+            "நம்பிக்கை:", "நம்பிக்கை :",
             "நோய்:", "நோய் :",
+            "தீவிரம்:", "தீவிரம் :",
+            "குறிப்பு:", "குறிப்பு :",
             "அறிகுறிகள்:", "அறிகுறிகள் :",
             "காரணம்:", "காரணம் :",
             "சிகிச்சை:", "சிகிச்சை :",
             "தடுப்பு முறைகள்:", "தடுப்பு முறைகள் :",
-            "மருந்து:", "மருந்து :"
+            "மருந்து:", "மருந்து :",
+            CropDiagnosis.VERIFIED_LABEL_TAMIL
         };
 
         for (String label : labels) {
@@ -726,30 +723,6 @@ public class WhatsAppWebhookController {
             if (!extracted.isEmpty()) return extracted;
         }
         return "";
-    }
-
-    /**
-     * Infers a Tamil severity label by scanning the diagnosis text for
-     * indicator words. Returns one of: கடுமையானது / மிதமானது / லேசானது.
-     */
-    private String inferSeverity(String diagnosis) {
-        String lower = diagnosis.toLowerCase();
-
-        // Severe indicators
-        if (lower.contains("கடுமையான")  || lower.contains("அதிக பாதிப்பு") ||
-            lower.contains("முழுவதும்")  || lower.contains("உடனடியாக அகற்று") ||
-            lower.contains("விரைவில்")   || lower.contains("பரவி")) {
-            return "கடுமையானது 🔴";
-        }
-
-        // Mild indicators
-        if (lower.contains("லேசான")      || lower.contains("ஆரம்ப நிலை") ||
-            lower.contains("சில இடங்கள்") || lower.contains("குறைந்த அளவு")) {
-            return "லேசானது 🟢";
-        }
-
-        // Default — moderate
-        return "மிதமானது 🟡";
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────
