@@ -209,6 +209,208 @@ class CropDiagnosisTest {
         assertFalse(m.contains("சிகிச்சை:"));
     }
 
+    // ---- tolerant parsing: formats a smaller model may produce ----
+
+    private static void assertShown(String reply) {
+        assertNull(CropDiagnosis.unsureReason(reply), "should be a normal diagnosis: " + reply);
+        assertEquals("Tomato", CropDiagnosis.crop(reply));
+    }
+
+    @Test
+    void format_bold() {
+        assertShown("**Crop:** Tomato\n**Confidence:** High\n**Disease:** Early blight");
+        assertShown("**Crop**: Tomato\n**Confidence**: **High**\n**Disease**: Early blight");
+        assertShown("**Crop: Tomato**\n**Confidence: high**\n**Disease: Early blight**");
+        assertShown("__Crop:__ Tomato\n_Confidence_: high\nDisease: Early blight");
+    }
+
+    @Test
+    void format_numbered() {
+        assertShown("1. Crop: Tomato\n2. Confidence: high\n3. Disease: Early blight");
+        assertShown("1) **Crop:** Tomato\n2) **Confidence:** medium\n3) **Disease:** Early blight");
+    }
+
+    @Test
+    void format_bulletsHeadingsAndQuotes() {
+        assertShown("- Crop: Tomato\n- Confidence: high\n- Disease: Early blight");
+        assertShown("• Crop: Tomato\n• Confidence: high\n• Disease: Early blight");
+        assertShown("* Crop: Tomato\n* Confidence: high\n* Disease: Early blight");
+        assertShown("## Crop: Tomato\n## Confidence: high\n## Disease: Early blight");
+        assertShown("> Crop: Tomato\n> Confidence: high\n> Disease: Early blight");
+    }
+
+    @Test
+    void format_labelSynonyms() {
+        assertShown("Plant: Tomato\nConfidence level: High\nProblem: Early blight");
+        assertShown("Crop Name: Tomato\nConfidence: high\nIssue: Early blight");
+        assertShown("Crop identified: Tomato\nConfidence: high\nPossible problem: Early blight");
+        assertEquals("Early blight", CropDiagnosis.disease("Problem: Early blight"));
+    }
+
+    @Test
+    void format_caseSpacingAndFullWidthColon() {
+        assertShown("CROP : Tomato\ncONFIDENCE:high\ndisease   :   Early blight");
+        assertShown("Crop： Tomato\nConfidence：high\nDisease： Early blight");
+        assertShown("Crop (பயிர்): Tomato\nConfidence: high\nDisease: Early blight");
+    }
+
+    @Test
+    void format_tamilLabelsAndTamilConfidenceWords() {
+        assertNull(CropDiagnosis.unsureReason("பயிர்: தக்காளி\nநம்பிக்கை: அதிகம்\nநோய்: இலை கருகல் நோய்"));
+        assertNull(CropDiagnosis.unsureReason("**பயிர்:** தக்காளி\n**நம்பிக்கை:** நடுத்தரம்\n**நோய்:** இலை கருகல்"));
+        assertNull(CropDiagnosis.unsureReason("1. பயிரின் பெயர்: தக்காளி\n2. நம்பிக்கை: medium\n3. நோய்: இலை கருகல்"));
+        assertEquals("தக்காளி", CropDiagnosis.crop("பயிர் : தக்காளி"));
+        assertEquals("low", CropDiagnosis.confidence("நம்பிக்கை: குறைவு"));
+        assertEquals(CropDiagnosis.UnsureReason.LOW_CONFIDENCE,
+                CropDiagnosis.unsureReason("பயிர்: தக்காளி\nநம்பிக்கை: குறைவு\nநோய்: இலை கருகல்"));
+    }
+
+    @Test
+    void format_missingConfidence_isStillUnsure() {
+        assertEquals(CropDiagnosis.UnsureReason.NO_CONFIDENCE_LINE,
+                CropDiagnosis.unsureReason("1. **Crop:** Tomato\n2. **Disease:** Early blight"));
+        assertEquals(CropDiagnosis.UnsureReason.NO_CONFIDENCE_LINE,
+                CropDiagnosis.unsureReason("Crop: Tomato\nConfidence: 85%\nDisease: Early blight"));
+    }
+
+    @Test
+    void format_lowConfidenceTentative_worksWithNewFormats() {
+        String m = CropDiagnosis.tentativeMessage(
+                "1. **Plant:** Tomato\n2. **Confidence level:** Low\n3. **Symptoms:** small dark spots\n4. **Problem:** Early blight",
+                "english");
+        assertNotNull(m);
+        assertTrue(m.contains("Tomato") && m.contains("small dark spots") && m.contains("Early blight"));
+        assertNoMedicineOrVerified(m);
+    }
+
+    // ---- tolerant parsing must not weaken the safety rules ----
+
+    @Test
+    void safety_similarLabelsAreNotTheCropOrDisease() {
+        assertNull(CropDiagnosis.crop("Crop rotation: paddy\nConfidence: high"));
+        assertNull(CropDiagnosis.crop("Plantation: 2 acres"));
+        assertNull(CropDiagnosis.disease("Disease management: spray"));
+        assertEquals(CropDiagnosis.UnsureReason.NO_CROP,
+                CropDiagnosis.unsureReason("Crop rotation: paddy\nConfidence: high\nDisease: Early blight"));
+    }
+
+    @Test
+    void safety_synonymStillGoesThroughUnclearAndNotSureChecks() {
+        assertEquals(CropDiagnosis.UnsureReason.UNCLEAR_CROP,
+                CropDiagnosis.unsureReason("Plant: not a crop leaf\nConfidence: high\nProblem: Early blight"));
+        assertEquals(CropDiagnosis.UnsureReason.NOT_SURE_PHRASE,
+                CropDiagnosis.unsureReason("1. Plant: Tomato\n2. Confidence: high\n3. Problem: Early blight\nResult: I am not sure."));
+    }
+
+    @Test
+    void safety_lowConfidenceNeverGetsMedicine_inAnyFormat() {
+        String low = "1. **Crop:** Tomato\n2. **Confidence:** low\n3. **Symptoms:** dark spots\n4. **Disease:** Early blight\n"
+                + "5. **Medicine:** Mancozeb";
+        assertEquals(CropDiagnosis.UnsureReason.LOW_CONFIDENCE, CropDiagnosis.unsureReason(low));
+        String m = CropDiagnosis.tentativeMessage(low, "english");
+        assertNotNull(m);
+        assertFalse(m.toLowerCase().contains("mancozeb"));
+        assertNull(CropDiagnosis.tentativeMessage(low.replace("dark spots", "dark spots, spray mancozeb"), "english"));
+    }
+
+    @Test
+    void safety_modelsOwnMedicineLineIsDroppedInAnyFormat() {
+        for (String medicine : new String[]{"Medicine: Mancozeb", "**Medicine:** Mancozeb", "- Medicine: Mancozeb",
+                "5. Medicine: Mancozeb", "5. **Medicine:** Mancozeb", "## Medicine: Mancozeb", "Medicine： Mancozeb"}) {
+            String out = CropDiagnosis.withVerifiedSolution("Crop: Tomato\n" + medicine + "\nNote: x", "Use Y", "english");
+            assertFalse(out.toLowerCase().contains("mancozeb"), "not dropped: " + medicine);
+            assertTrue(out.contains(CropDiagnosis.VERIFIED_LABEL_ENGLISH + " Use Y"));
+        }
+    }
+
+    // ---- value on the next line: only short, non-label, non-bullet lines ----
+
+    private static String nextLineReply(String cropValueLine) {
+        return "Confidence: high\nCrop:\n" + cropValueLine + "\nDisease: Early blight";
+    }
+
+    @Test
+    void nextLine_shortPlainValue_isAccepted() {
+        assertShown(nextLineReply("Tomato"));
+        assertShown(nextLineReply("**Tomato**"));
+        assertShown("Confidence: high\nCrop:\n\n  Tomato  \nDisease: Early blight");   // blank line in between
+        assertShown("**Crop:**\nTomato\n**Confidence:** high\n**Disease:** Early blight");
+    }
+
+    @Test
+    void nextLine_lengthLimitIs40Characters() {
+        String forty = "a".repeat(40);
+        String fortyOne = "a".repeat(41);
+        assertEquals(forty, CropDiagnosis.crop(nextLineReply(forty)));
+        assertNull(CropDiagnosis.unsureReason(nextLineReply(forty)));
+        assertEquals("", CropDiagnosis.crop(nextLineReply(fortyOne)));
+        assertEquals(CropDiagnosis.UnsureReason.NO_CROP, CropDiagnosis.unsureReason(nextLineReply(fortyOne)));
+    }
+
+    @Test
+    void nextLine_aLabelLineIsNeverTakenAsTheValue() {
+        assertEquals(CropDiagnosis.UnsureReason.NO_CROP,
+                CropDiagnosis.unsureReason("Crop:\nDisease: Early blight\nConfidence: high"));
+        assertEquals(CropDiagnosis.UnsureReason.NO_CROP,
+                CropDiagnosis.unsureReason("Crop:\nConfidence: high\nDisease: Early blight"));
+        // a recognised label followed by a colon anywhere in the next line also blocks it
+        assertEquals(CropDiagnosis.UnsureReason.NO_CROP,
+                CropDiagnosis.unsureReason(nextLineReply("Tomato (disease: blight)")));
+        assertEquals(CropDiagnosis.UnsureReason.NO_CROP,
+                CropDiagnosis.unsureReason(nextLineReply("**நோய்:** இலை கருகல்")));
+        assertEquals("", CropDiagnosis.crop("Crop:\nTreatment: remove leaves\nConfidence: high"));
+    }
+
+    @Test
+    void nextLine_aBulletOrHeadingStartingANewSectionIsNeverTakenAsTheValue() {
+        for (String bullet : new String[]{"- Tomato", "• Tomato", "* Tomato", "1. Tomato", "2) Tomato", "## Tomato"}) {
+            assertEquals(CropDiagnosis.UnsureReason.NO_CROP, CropDiagnosis.unsureReason(nextLineReply(bullet)),
+                    "bullet accepted as value: " + bullet);
+        }
+    }
+
+    @Test
+    void nextLine_endOfTextOrOnlyBlankLines_givesEmptyValue() {
+        assertEquals("", CropDiagnosis.crop("Confidence: high\nCrop:"));
+        assertEquals("", CropDiagnosis.crop("Confidence: high\nCrop:\n\n   \n"));
+    }
+
+    // ---- labelsFound: label names only, never values ----
+
+    @Test
+    void labelsFound_returnsOnlyLabelNames() {
+        String reply = "1. **Plant Name:** Tomato\n- Confidence: high\n"
+                + "The tomato leaf shows many dark brown spots with rings: early blight\n"
+                + "Step 2: do x\nDisease: Early blight (Alternaria)\nNo colon here";
+        java.util.List<String> labels = CropDiagnosis.labelsFound(reply);
+        assertEquals(java.util.List.of("Plant Name", "Confidence", "Disease"), labels);
+        String joined = String.join("|", labels).toLowerCase();
+        for (String value : new String[]{"tomato", "high", "blight", "alternaria", "spots"}) {
+            assertFalse(joined.contains(value), "value leaked: " + value);
+        }
+    }
+
+    @Test
+    void labelsFound_capsCountAndLength() {
+        StringBuilder many = new StringBuilder();
+        for (char c = 'a'; c <= 'o'; c++) many.append("Label ").append(c).append(": v\n");
+        assertEquals(10, CropDiagnosis.labelsFound(many.toString()).size());
+        for (String label : CropDiagnosis.labelsFound("A".repeat(20) + ": v\n" + "A".repeat(21) + ": v")) {
+            assertTrue(label.length() <= 20);
+        }
+        assertEquals(1, CropDiagnosis.labelsFound("A".repeat(20) + ": v\n" + "A".repeat(21) + ": v").size());
+    }
+
+    @Test
+    void labelsFound_skipsProseDigitsAndHandlesNullOrEmpty() {
+        assertTrue(CropDiagnosis.labelsFound(null).isEmpty());
+        assertTrue(CropDiagnosis.labelsFound("").isEmpty());
+        assertTrue(CropDiagnosis.labelsFound("Tomato early blight on lower old leaves: yes").isEmpty());
+        assertTrue(CropDiagnosis.labelsFound("Step 1: spray\nRate 5g: ok").isEmpty());
+        assertEquals(java.util.List.of("பயிர்", "நம்பிக்கை"),
+                CropDiagnosis.labelsFound("பயிர்: தக்காளி\nநம்பிக்கை: அதிகம்"));
+    }
+
     @Test
     void withKvkNote_appendsNoteInTheRightLanguage() {
         assertTrue(CropDiagnosis.withKvkNote(CONFIDENT_EN, "english").endsWith(CropDiagnosis.KVK_ENGLISH));

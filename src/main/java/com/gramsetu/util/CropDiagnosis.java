@@ -1,7 +1,6 @@
 package com.gramsetu.util;
 
 import java.util.Locale;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -31,9 +30,13 @@ public final class CropDiagnosis {
     public static final String UNAVAILABLE_ENGLISH =
             "The photo could not be analysed right now. Please try again in a little while.\n\nNote: " + KVK_ENGLISH;
 
-    private static final String[] CROP = {"Crop", "பயிர்"};
-    private static final String[] CONFIDENCE = {"Confidence", "நம்பிக்கை"};
-    private static final String[] DISEASE = {"Disease", "நோய்"};
+    // Accepted label spellings, lower-case. A line's whole text before the first colon (minus a parenthesised gloss
+    // such as "Crop (பயிர்)") must equal one of these - never a loose "contains", so "Crop rotation:" is not a crop.
+    private static final String[] CROP = {
+            "crop", "crop name", "plant", "plant name", "crop identified", "பயிர்", "பயிரின் பெயர்"};
+    private static final String[] CONFIDENCE = {"confidence", "confidence level", "நம்பிக்கை"};
+    private static final String[] DISEASE = {
+            "disease", "disease name", "problem", "possible problem", "issue", "நோய்"};
 
     private static final String[] UNCLEAR_CROP_WORDS = {
             "unclear", "not a crop", "not sure", "unknown", "unidentified", "cannot", "can't",
@@ -54,9 +57,9 @@ public final class CropDiagnosis {
         String value = lineValue(text, CONFIDENCE);
         if (value == null) return null;
         String v = value.toLowerCase(Locale.ROOT);
-        if (v.contains("low")) return "low";
-        if (v.contains("medium")) return "medium";
-        if (v.contains("high")) return "high";
+        if (v.contains("low") || v.contains("குறைவு")) return "low";
+        if (v.contains("medium") || v.contains("நடுத்தரம்")) return "medium";
+        if (v.contains("high") || v.contains("அதிகம்")) return "high";
         return null;
     }
 
@@ -108,7 +111,7 @@ public final class CropDiagnosis {
 
     // ---- Tentative reply: low confidence, but a plant, visible symptoms and a possible problem were named ----
 
-    private static final String[] SYMPTOMS = {"Symptoms", "அறிகுறிகள்"};
+    private static final String[] SYMPTOMS = {"symptoms", "symptom", "அறிகுறிகள்", "அறிகுறி"};
 
     /** Words that mean the model slipped treatment advice into a field that should only describe or name. */
     private static final String[] TREATMENT_WORDS = {
@@ -169,7 +172,7 @@ public final class CropDiagnosis {
     public static final String VERIFIED_LABEL_ENGLISH = "TNAU recommendation:";
 
     private static final Pattern MEDICINE_LINE =
-            Pattern.compile("(?im)^[ \\t\\-•*]*(?:Medicine|மருந்து)[\\s*]*:.*(?:\\R|$)");
+            Pattern.compile("(?im)^[ \\t>#\\-•*_]*(?:\\d{1,2}[.)]\\s*)?[ \\t*_]*(?:Medicine|மருந்து)[\\s*_]*[:：].*(?:\\R|$)");
 
     /**
      * For a verified advisory match: drops the model's own medicine line and adds the advisory's
@@ -183,13 +186,120 @@ public final class CropDiagnosis {
         return withoutMedicine + "\n" + label + " " + solution.strip();
     }
 
+    // ---- tolerant line parsing ----
+
+    /** Other labels the prompt asks for. Only used to recognise "this next line is a label line". */
+    private static final String[] OTHER_LABELS = {
+            "severity", "treatment", "medicine", "prevention", "result", "note", "cause",
+            "தீவிரம்", "சிகிச்சை", "மருந்து", "தடுப்பு முறைகள்", "குறிப்பு", "காரணம்", "முடிவு"};
+
+    /** A recognised label (optionally with a parenthesised gloss) followed by a colon, anywhere in a line. */
+    private static final Pattern LABEL_COLON = buildLabelColon();
+
+    private static Pattern buildLabelColon() {
+        StringBuilder sb = new StringBuilder();
+        for (String[] group : new String[][]{CROP, CONFIDENCE, DISEASE, SYMPTOMS, OTHER_LABELS}) {
+            for (String label : group) {
+                if (sb.length() > 0) sb.append('|');
+                sb.append(Pattern.quote(label));
+            }
+        }
+        return Pattern.compile("(?<![\\p{L}\\p{M}])(?:" + sb + ")\\s*(?:\\([^)]*\\))?\\s*:",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
+
+    private static final Pattern EDGE_UNDERSCORES = Pattern.compile("(?<![\\p{L}\\p{M}\\p{N}])_+|_+(?![\\p{L}\\p{M}\\p{N}])");
+    private static final Pattern LEADING_MARKERS =
+            Pattern.compile("^[\\s>#\\-•·*]*(?:(?:\\d{1,2}|[A-Za-z])[.)]\\s+)?[\\s>#\\-•·*]*");
+    private static final Pattern SECTION_START =
+            Pattern.compile("^(?:[\\-•·#>]|\\*\\s|\\d{1,2}[.)](?:\\s|$))");
+    private static final Pattern GLOSS = Pattern.compile("\\s*\\([^)]*\\)\\s*");
+    private static final int NEXT_LINE_MAX = 40;
+
+    /** Emphasis, full-width colon and spacing normalised; list, heading and quote markers kept. */
+    private static String tidy(String line) {
+        String s = line.replace('：', ':').replace("*", "");
+        s = EDGE_UNDERSCORES.matcher(s).replaceAll("");
+        return s.replaceAll("[ \\t]+", " ").strip();
+    }
+
+    /** {@link #tidy} plus leading bullet / number / heading / quote markers removed. */
+    private static String cleanLine(String line) {
+        String s = line.replace('：', ':').replace("*", "");
+        s = EDGE_UNDERSCORES.matcher(s).replaceAll("");
+        s = LEADING_MARKERS.matcher(s).replaceFirst("");
+        return s.replaceAll("[ \\t]+", " ").strip();
+    }
+
+    private static String canonicalLabel(String left) {
+        return GLOSS.matcher(left.toLowerCase(Locale.ROOT)).replaceAll(" ").strip();
+    }
+
+    private static boolean isOneOf(String label, String[] accepted) {
+        for (String a : accepted) {
+            if (a.equals(label)) return true;
+        }
+        return false;
+    }
+
     private static String lineValue(String text, String[] labels) {
         if (text == null) return null;
-        String clean = text.replace("*", "");
-        for (String label : labels) {
-            Matcher m = Pattern.compile("(?im)^[\\s\\-•]*" + Pattern.quote(label) + "\\s*:[ \\t]*(.*)$").matcher(clean);
-            if (m.find()) return m.group(1).strip();
+        String[] lines = text.split("\\R", -1);
+        boolean found = false;
+        for (int i = 0; i < lines.length; i++) {
+            String cleaned = cleanLine(lines[i]);
+            int colon = cleaned.indexOf(':');
+            if (colon <= 0) continue;
+            if (!isOneOf(canonicalLabel(cleaned.substring(0, colon)), labels)) continue;
+            found = true;
+            String value = cleaned.substring(colon + 1).strip();
+            if (!value.isEmpty()) return value;
+            String next = nextLineValue(lines, i);
+            if (next != null) return next;
         }
-        return null;
+        return found ? "" : null;
+    }
+
+    /**
+     * For a label with nothing after the colon: the next non-empty line, but only when it is short (at most
+     * {@value #NEXT_LINE_MAX} characters), is not itself a label line and is not a bullet / number / heading that
+     * starts a new section. Otherwise null.
+     */
+    private static String nextLineValue(String[] lines, int labelIndex) {
+        int j = labelIndex + 1;
+        while (j < lines.length && lines[j].isBlank()) j++;
+        if (j >= lines.length) return null;
+        String raw = lines[j].strip();
+        if (SECTION_START.matcher(raw).find()) return null;
+        String value = tidy(raw);
+        if (value.isEmpty() || value.length() > NEXT_LINE_MAX) return null;
+        if (LABEL_COLON.matcher(value).find()) return null;
+        return value;
+    }
+
+    private static final int MAX_LABELS = 10;
+    private static final int MAX_LABEL_LENGTH = 20;
+    private static final int MAX_LABEL_WORDS = 3;
+    private static final Pattern LABEL_SHAPE = Pattern.compile("^[\\p{L}\\p{M}]+(?: [\\p{L}\\p{M}]+)*$");
+
+    /**
+     * Only the names of the "label: value" lines found in the answer (the text before the colon), for diagnosing
+     * why an answer was not recognised. At most 10 labels of at most 20 characters, letters and spaces only, at
+     * most 3 words; any longer or odd-looking prefix is skipped as it may be answer text. Never returns a value.
+     */
+    public static java.util.List<String> labelsFound(String text) {
+        java.util.Set<String> labels = new java.util.LinkedHashSet<>();
+        if (text == null) return new java.util.ArrayList<>(labels);
+        for (String line : text.split("\\R", -1)) {
+            String cleaned = cleanLine(line);
+            int colon = cleaned.indexOf(':');
+            if (colon <= 0) continue;
+            String left = cleaned.substring(0, colon).strip();
+            if (left.length() > MAX_LABEL_LENGTH || !LABEL_SHAPE.matcher(left).matches()) continue;
+            if (left.split(" ").length > MAX_LABEL_WORDS) continue;
+            labels.add(left);
+            if (labels.size() >= MAX_LABELS) break;
+        }
+        return new java.util.ArrayList<>(labels);
     }
 }
