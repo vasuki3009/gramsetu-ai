@@ -73,21 +73,25 @@ the crop calendar covers five districts: Thanjavur, Coimbatore, Krishnagiri, Din
 
 ## Screenshots
 
-<p>
-  <img src="docs/screenshots/ui-home-1440x900.png" alt="GramSetu home screen on a desktop: a paddy-field illustration, the Ask in Tamil action, example questions, how it works, a sample WhatsApp chat and feature cards" width="460">
-  <img src="docs/screenshots/ui-home-390x844.png" alt="GramSetu home screen on a phone" width="180">
-</p>
-<p>
-  <img src="docs/screenshots/voice.svg" alt="Voice assistant (placeholder)" width="180">
-  <img src="docs/screenshots/crop-diagnosis.svg" alt="Crop disease diagnosis (placeholder)" width="180">
-  <img src="docs/screenshots/schemes.svg" alt="Government schemes (placeholder)" width="180">
-</p>
-<p>
-  <img src="docs/screenshots/calendar.svg" alt="Crop calendar (placeholder)" width="180">
-  <img src="docs/screenshots/whatsapp-chat.svg" alt="WhatsApp conversation (placeholder)" width="180">
+<p align="center">
+  <img src="docs/screenshots/ui-home-1440x900.png" alt="GramSetu home screen on a desktop: a paddy-field illustration, the Ask in Tamil action, example questions, how it works, a sample WhatsApp chat and feature cards" width="640"><br>
+  <em>Home</em>
 </p>
 
-*The two home-screen images are real screenshots of the current design, taken with sample data (no live backend). The other images are placeholders; see [`docs/screenshots/README.md`](docs/screenshots/README.md) for how to replace them with real screenshots.*
+<p align="center">
+  <img src="docs/screenshots/ask-tamil.png" alt="Asking a question in Tamil in the web app, with the dialect answer and a speaker button to listen to it" width="640"><br>
+  <em>Ask in Tamil: the answer in the farmer's dialect, with a speaker button to hear it read aloud</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/ui-ask-1440x900.png" alt="The Ask screen in the desktop layout" width="640"><br>
+  <em>Ask, desktop layout</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/whatsapp-chat.png" alt="A WhatsApp conversation with GramSetu showing Tamil text and audio replies" width="320"><br>
+  <em>WhatsApp: Tamil text and audio replies</em>
+</p>
 
 ## Architecture
 
