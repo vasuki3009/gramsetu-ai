@@ -50,17 +50,17 @@ export default {
       // Fluid type scale (phone size -> desktop size). Tamil needs generous line-height for its vowel
       // signs: 1.6-1.65 for reading text, never below 1.3 for any heading.
       fontSize: {
-        small: [fluid({ min: 16, base: 16, vw: 0, max: 16, desk: 13 }), { lineHeight: '1.6' }],
-        body: [fluid({ min: 17, base: 16, vw: 0.25, max: 19, desk: 15.5 }), { lineHeight: '1.65' }],
-        lead: [fluid({ min: 19, base: 17.6, vw: 0.4, max: 22, desk: 16 }), { lineHeight: '1.6' }],
-        btnlg: [fluid({ min: 19, base: 17.6, vw: 0.4, max: 22, desk: 15.5 }), { lineHeight: '1.4' }],
-        h3: [fluid({ min: 19, base: 17.6, vw: 0.4, max: 22, desk: 18 }), { lineHeight: '1.45' }],
-        h2: [fluid({ min: 22, base: 18.4, vw: 0.9, max: 30, desk: 22.5 }), { lineHeight: '1.4' }],
-        section: [fluid({ min: 28, base: 24, vw: 0.6, max: 30, desk: 26 }), { lineHeight: '1.35' }],
-        h1: [fluid({ min: 28, base: 20.8, vw: 1.8, max: 44, desk: 30 }), { lineHeight: '1.35' }],
-        display: [fluid({ min: 32, base: 19.2, vw: 3.4, max: 60, desk: 40 }), { lineHeight: '1.3' }],
-        // hero heading from 1024px up: 36px at 1024, 40px from 1280 (the sidebar leaves the hero narrow at 1024)
-        hero: ['clamp(2.25rem, 1.25rem + 1.5625vw, 2.5rem)', { lineHeight: '1.3' }],
+        small: [fluid({ min: 15.2, base: 15.2, vw: 0, max: 15.2, desk: 12 }), { lineHeight: '1.6' }],
+        body: [fluid({ min: 16.2, base: 15.2, vw: 0.24, max: 18, desk: 14 }), { lineHeight: '1.65' }],
+        lead: [fluid({ min: 18, base: 16.7, vw: 0.38, max: 21, desk: 14.4 }), { lineHeight: '1.6' }],
+        btnlg: [fluid({ min: 18, base: 16.7, vw: 0.38, max: 21, desk: 14 }), { lineHeight: '1.4' }],
+        h3: [fluid({ min: 18, base: 16.7, vw: 0.38, max: 21, desk: 16 }), { lineHeight: '1.45' }],
+        h2: [fluid({ min: 21, base: 17.5, vw: 0.86, max: 28.5, desk: 20 }), { lineHeight: '1.4' }],
+        section: [fluid({ min: 26.5, base: 22.8, vw: 0.57, max: 28.5, desk: 23 }), { lineHeight: '1.35' }],
+        h1: [fluid({ min: 26.6, base: 19.8, vw: 1.71, max: 41.8, desk: 27 }), { lineHeight: '1.35' }],
+        display: [fluid({ min: 30.4, base: 18.2, vw: 3.23, max: 57, desk: 36 }), { lineHeight: '1.3' }],
+        // hero heading from 1024px up: 32px at 1024, 36px from 1280 (the sidebar leaves the hero narrow at 1024)
+        hero: ['clamp(2rem, 1rem + 1.5625vw, 2.25rem)', { lineHeight: '1.3' }],
       },
       maxWidth: { page: '1200px' },
       // Radii: control 14, card 20, panel 32, pill full
