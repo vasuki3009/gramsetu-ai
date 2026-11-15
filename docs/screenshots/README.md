@@ -1,12 +1,18 @@
 # Screenshots
 
-The images in this folder are **placeholders** (`*.svg`). To replace them with real screenshots:
+Images used by the root `README.md`:
 
-1. Capture each screen (a phone-sized window, about 360 x 640, works well) and save it here as a PNG
-   with the same base name: `home.png`, `voice.png`, `crop-diagnosis.png`, `schemes.png`,
-   `calendar.png`, `whatsapp-chat.png`.
-2. In the root `README.md`, change each `docs/screenshots/<name>.svg` link to `<name>.png`.
-3. Delete the matching `.svg` placeholder.
+| File | Shows |
+| --- | --- |
+| `ui-home-1440x900.png` | Home screen, desktop |
+| `ask-tamil.png` | Asking in Tamil, with the dialect answer and speaker button |
+| `ui-ask-1440x900.png` | Ask screen, desktop layout |
+| `whatsapp-chat.png` | WhatsApp conversation: Tamil text and audio replies |
+
+The other `ui-*` PNGs are the same screens at additional viewport sizes (390x844, 768x1024, 1024x768,
+1920x1080), and `ask-pm-kisan.png` is an extra capture that the README does not currently use.
+
+The `ui-*` images were taken with sample data (no live backend).
 
 Tips: blur or crop out phone numbers, names and anything from a real farmer's conversation before
 committing a screenshot. Use the Twilio sandbox number or a test number in WhatsApp captures.

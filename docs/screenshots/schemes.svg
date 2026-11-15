@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="360" height="640" viewBox="0 0 360 640" role="img" aria-label="Screenshot placeholder: Government schemes">
-  <rect width="360" height="640" rx="24" fill="#f0faf4" stroke="#86b89a" stroke-width="3" stroke-dasharray="10 8"/>
-  <rect x="24" y="24" width="312" height="14" rx="7" fill="#c9e6d3"/>
-  <text x="180" y="300" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="bold" fill="#0a3d2b">Government schemes</text>
-  <text x="180" y="332" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#3d6b52">Matching schemes for a question</text>
-  <text x="180" y="384" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#6b8f7a">Screenshot placeholder</text>
-  <text x="180" y="406" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#6b8f7a">replace with docs/screenshots/schemes.png</text>
-</svg>
